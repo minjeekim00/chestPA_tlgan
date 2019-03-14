@@ -1,3 +1,6 @@
 [submodule "src/model/pggan"]
 	path = src/model/pggan
 	url = https://github.com/minjeekim00/progressive_growing_of_gans.git
+[submodule "src/model/chestPA_classifier"]
+	path = src/model/chestPA_classifier
+	url = https://github.com/minjeekim00/chestPA_classifier.git
