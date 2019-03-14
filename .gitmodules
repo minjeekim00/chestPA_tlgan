@@ -4,3 +4,6 @@
 [submodule "src/model/chestPA_classifier"]
 	path = src/model/chestPA_classifier
 	url = https://github.com/minjeekim00/chestPA_classifier.git
+[submodule "src/model/tlgan"]
+	path = src/model/tlgan
+	url = https://github.com/minjeekim00/transparent_latent_gan.git
