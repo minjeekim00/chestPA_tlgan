@@ -1,0 +1,6 @@
+00Normal
+01Nodule
+03Consolidation
+04InterstitialOpacity
+10PleuralEffusion
+11Pneumothorax
