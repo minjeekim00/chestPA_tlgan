@@ -1,0 +1,3 @@
+[submodule "src/model/pggan"]
+	path = src/model/pggan
+	url = https://github.com/minjeekim00/progressive_growing_of_gans.git
