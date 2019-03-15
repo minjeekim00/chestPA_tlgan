@@ -10,6 +10,9 @@ import glob
 import h5py
 import shutil
 from tqdm import tqdm
+
+path = './src/model/chestPA_classifier'
+sys.path.append(path)
 from src.model.chestPA_classifier.model import classifier
 from src.model.chestPA_classifier import test
 

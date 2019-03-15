@@ -10,8 +10,6 @@ import tensorflow as tf
 import PIL.Image
 import datetime
 import glob
-
-import src.misc as misc
 import src.tl_gan.feature_axis as feature_axis
 import matplotlib.pyplot as plt
 %matplotlib inline
