@@ -5,91 +5,110 @@ import glob
 import numpy as np
 import tensorflow as tf
 import PIL.Image
-import src.tl_gan.get_normal_images as get_normal_images
+sys.path.append('./src/model/pggan/')
+sys.path.append('./src/model/chestPA_classifier/')
+sys.path.append('./src/tl_gan')
+import get_normal_images as get_normal_images
 
+import imageio
+from src.model.chestPA_classifier.chestPA_cam import plot_cam, classes
+from tqdm import tqdm
 
-""" start tf session and load GAN model """
 
 # path to model code and weight
-path_pg_gan_code = './src/model/pggan'
 path_model = './asset_model/x-ray_integrated_20190218_network-snapshot-014000.pkl'
-sys.path.append(path_pg_gan_code)
-path_gan_explore = './asset_results/pggan_x_ray_integrated_norm_axis_explore/'
-
+path_gan_explore = './asset_results/axis_explore/'
+if not os.path.exists(path_gan_explore):
+    os.mkdir(path_gan_explore)
 """ get feature direction vector """
-path_feature_direction = './asset_results/pg_gan_x_ray_integrated_norm_feature_direction_5/'
-pathfile_feature_direction = glob.glob(os.path.join(path_feature_direction, 'feature_direction_*.pkl'))[-1]
+path_feature_direction = './asset_results/feature_direction_6/'
+pathfile_feature_directions = glob.glob(os.path.join(path_feature_direction, 'feature_direction_*.pkl'))
+cases = [4525] #[7386, 4161] #[1987, 3774, 5332]
 
-with open(pathfile_feature_direction, 'rb') as f:
-    feature_direction_name = pickle.load(f)
-
-feature_direction = feature_direction_name['direction']
-feature_name = feature_direction_name['name']
-num_feature = feature_direction.shape[1]
-
+def create_dst_path():
+    path_gan_version = path_gan_explore+method+'_'+version
+    if is_weighted:
+        path_gan_version+='_weighted'
+    if is_orthogonal:
+        path_gan_version+='_orthogonal'
+    if not os.path.exists(path_gan_version):
+        os.mkdir(path_gan_version)
+    return path_gan_version
 
 """ play with the latent space """
 sess = tf.InteractiveSession()
 with open(path_model, 'rb') as file:
     G, D, Gs = pickle.load(file)
+
+for pathfile_feature_direction in pathfile_feature_directions:
+    with open(pathfile_feature_direction, 'rb') as f:
+        feature_direction_name = pickle.load(f)
+
+    feature_direction = feature_direction_name['direction']
+    feature_name = feature_direction_name['name']
+    num_feature = feature_direction.shape[1]
+
+    path_basename = os.path.basename(pathfile_feature_direction)
+    method = path_basename.split('_')[2]
+    version = path_basename.split('_')[3]
+    is_weighted = True if 'weighted' in path_basename else False
+    is_orthogonal = True if 'orthogonal' in path_basename else False
+
+    if 'linear' in method:
+        step_sizes = [0.4, 0.4, 0.4, 0.4, 0.4] 
+    elif 'lasso' in method:
+        step_sizes = [0.4, 0.4, 0.4, 0.4, 0.8] 
+    batch_size = 40
+
+    latents_n = get_normal_images.get_all_images()[cases]# hand-picked image
     
-    
-step_sizes = [1, 0.25 ,0.25, 0.25] 
-batch_size = 40
+    for cidx, latent in enumerate(latents_n):
+        path_gan_version = create_dst_path()
+        path_case=path_gan_version+'/'+str(cases[cidx])
+        if not os.path.exists(path_case):
+            os.mkdir(path_case)
+        else: continue
+        print(path_case)          
+        for cls in range(feature_direction.shape[1]):
+            latents = np.random.randn(batch_size, *Gs.input_shapes[0][1:])
+            for i, alpha in enumerate(range(batch_size)):
+                step_size = step_sizes[(cls)]
+                latents[i, :] = latent+(feature_direction[:, cls][None, :][0] * (step_size * alpha))
 
-#latents_n = get_normal_images.get_single_image()
-handpicked = [1987, 3774, 5332]
-latents_n = get_normal_images.get_all_images()[handpicked]# hand-picked image
+            # Generate dummy labels (not used by the official networks).
+            labels = np.zeros([latents.shape[0]] + Gs.input_shapes[1][1:])
+            # Run the generator to produce a set of images.
+            images = Gs.run(latents, labels)
+            images = np.clip(np.rint((images + 1.0) / 2.0 * 255.0), 0.0, 255.0).astype(np.uint8)  # [-1,1] => [0,255]
+            images = images.transpose(0, 2, 3, 1)  # NCHW => NHWC
+            images = images.reshape(latents.shape[0],1024,1024)
 
+            # Save images as PNG.
+            for idx in range(images.shape[0]):
+                dst = os.path.join(path_case, 'img_{}_{}_{:03d}_{}.png'.format(cases[cidx], cls, idx, os.path.basename(path_gan_version)))
+                if os.path.exists(dst):
+                    continue
+                PIL.Image.fromarray(images[idx], 'L').save(dst)
 
-for i_latent, latent_n in enumerate(latents_n):
-    for i_feature in range(feature_direction.shape[1]):
-        latents = np.random.randn(batch_size, *Gs.input_shapes[0][1:])
-        for i, alpha in enumerate(range(batch_size)):
-            step_size = step_sizes[(i_feature)]
-            latents[i, :] = latent_n + (feature_direction[:, i_feature][None, :][0] * (step_size * alpha))
+    ##
 
-        # Generate dummy labels (not used by the official networks).
-        labels = np.zeros([latents.shape[0]] + Gs.input_shapes[1][1:])
-        # Run the generator to produce a set of images.
-        images = Gs.run(latents, labels)
-        images = np.clip(np.rint((images + 1.0) / 2.0 * 255.0), 0.0, 255.0).astype(np.uint8)  # [-1,1] => [0,255]
-        images = images.transpose(0, 2, 3, 1)  # NCHW => NHWC
-        images = images.reshape(latents.shape[0],1024,1024)
+    img_all = [sorted(glob.glob(os.path.join(path_case, 'img_{}_*.png'.format(i)))) for i in cases]
+    img_all = np.array(img_all).reshape(len(cases), len(step_sizes), batch_size).tolist()
+    path_cam = "./results_cam/"
+    cam_version = os.path.basename(path_gan_version)
+    path_dst = ["./results_cam/{}/{}".format(cases[idx], cam_version) for idx in range(len(img_all))]
 
-        import datetime
-        time_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    for idx, imgs in enumerate(img_all): # case별
+        if not os.path.exists(path_cam+str(cases[idx])):
+            os.mkdir(path_cam+str(cases[idx]))
+        for cidx, cimgs in enumerate(imgs): # class별
+            plot_cam(cimgs,plot_fig=True, show_cam=True, save_fig=True, 
+                     desired_dir=path_dst[idx])
+            cams = sorted(glob.glob(path_dst[0]+'/img_{}_{}_*.png'.format(cases[idx], cidx)))
+            images = []
+            for filename in cams:
+                images.append(imageio.imread(filename))
+            imageio.mimsave(path_dst[0]+'/cam_{}_{}.gif'.format(classes[cidx+1], cidx), images)
+            
 
-        # Save images as PNG.
-        for idx in range(images.shape[0]):
-            PIL.Image.fromarray(images[idx], 'L').save(os.path.join(path_gan_explore, 'img_{}_{}_{}.png'.format(handpicked[i_latent], i_feature, idx)))
-        #np.save(os.path.join(path_gan_explore, 'img_{}_{}.pkl'.format(time_str, i_feature)), labels)
-
-##
 sess.close()
-
-
-
-
-#### for generating CAM images
-
-import imageio
-from src.model.chestPA_classifier.cam import plot_cam, classes
-
-
-path_gan_explore = './asset_results/pggan_x_ray_integrated_norm_axis_explore/'
-
-n = batch_size * len(step_sizes)
-b = batch_size
-# hand-picked images
-total_images = [sorted(glob.glob(os.path.join(path_gan_explore, 'img_{}_*.png'.format(i))), key=os.path.getmtime) for i in handpicked]
-
-## generate CAM
-for case_idx, images in enumerate(total_images): # case별
-    for class_idx, images_per_class in enumerate([images[0:b], images[b:b*2], images[b*2:b*3], images[b*3:]]): # class별
-        plot_cam(dataset_test=images_per_class, plot_fig=True, show_cam=True, save_fig=True, desired_dir="./results/{}".format(handpicked[case_idx]))
-        cams_by_handpicked = sorted(glob.glob('./results/{}/img_{}_{}_*.png'.format(handpicked[case_idx], handpicked[case_idx], class_idx)), key=os.path.getmtime)
-        images = []
-        for filename in cams_by_handpicked:
-            images.append(imageio.imread(filename))
-        imageio.mimsave('./results/{}/cam_{}.gif'.format(handpicked[case_idx], classes[class_idx+1]), images)
